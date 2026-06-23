@@ -163,6 +163,11 @@
   #swipe .hint { position: absolute; opacity: .3; font-size: 17px; color: #6fa8e0; }
   #swipe .hint.up { top: 8px; } #swipe .hint.down { bottom: 8px; } #swipe .hint.left { left: 10px; } #swipe .hint.right { right: 10px; }
   #swipe .center { font-size: 11px; opacity: .45; text-align: center; line-height: 1.4; }
+  #nextWrap { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 46px; }
+  .nextlbl { font-size: 8.5px; opacity: .45; letter-spacing: .4px; text-transform: uppercase; }
+  #nextCard { width: 46px; flex: 1 1 auto; opacity: .62; transform: scale(.94); cursor: default; }
+  #nextCard.empty { opacity: .2; }
+  #nextCard .nm { font-size: 8px; }
   #hand { flex: 1 1 auto; display: flex; gap: 5px; }
   .card { flex: 1 1 0; min-width: 0; border-radius: 11px; background: #161a22; border: 1.5px solid #2a3140;
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 2px;
@@ -259,6 +264,7 @@
     </div>
     <div id="fuseHint">deslize na arena p/ mover · toque na carta p/ usar · arraste 2 iguais p/ fundir</div>
     <div id="controls">
+      <div id="nextWrap"><span class="nextlbl">próxima</span><div id="nextCard" class="card empty"></div></div>
       <div id="hand"></div>
     </div>
   </div>
@@ -308,7 +314,7 @@
 <script>
 (() => {
   "use strict";
-  const COLS = 3, ROWS = 6, HAND_SIZE = 5, GRAB_DUR = 5.0;
+  const COLS = 3, ROWS = 6, HAND_SIZE = 4, GRAB_DUR = 5.0;
   const ROUND_TIME = 90, WINS_NEEDED = 2, INTER_ROUND = 2.4;   // melhor de 3, cada round até 1:30
   const rand = a => a[(Math.random()*a.length)|0];
   const clamp = (v,a,b) => Math.max(a, Math.min(b, v));
@@ -404,7 +410,7 @@
     { id:"vanguard", nm:"Vanguarda", ico:"♜", ds:"tanque corpo-a-corpo", hp:1040, moveDelay:.21, dmgMult:1.15, regen:.9 },
     { id:"blade",    nm:"Lâmina",    ico:"♞", ds:"veloz e frágil",        hp:640, moveDelay:.10, dmgMult:1.0,  regen:.82 },
     { id:"gunner",   nm:"Artilheiro",ico:"♝", ds:"energia rápida, à distância", hp:800, moveDelay:.17, dmgMult:1.0, regen:.62 },
-    { id:"tactician",nm:"Tático",    ico:"♛", ds:"saque rápido, +energia", hp:800, moveDelay:.16, dmgMult:1.0, regen:.74, drawSpeed:.6, maxEnergy:12 },
+    { id:"tactician",nm:"Tático",    ico:"♛", ds:"energia ampla (+2 máx), versátil", hp:800, moveDelay:.16, dmgMult:1.0, regen:.70, maxEnergy:12 },
   ];
   const COLORS = ["#378add","#1d9e75","#d85a30","#7f77dd","#efb227","#e24b4a"];
 
@@ -594,8 +600,22 @@
       stats:{ moveDelay:conf.moveDelay, dmgMult:conf.dmgMult }, color:conf.color, ico:conf.ico||"♟",
       energy:conf.maxEnergy, maxEnergy:conf.maxEnergy, energyTick:0, regen:conf.regen, drawSpeed:conf.drawSpeed,
       energySpent:0, fusionPts:0, _lfp:-1, bleed:0, bleedBy:null, bleedClk:0, rooted:0, chanMit:0,
-      deck:[...conf.deck], hand:new Array(HAND_SIZE).fill(null), drawTimers:new Array(HAND_SIZE).fill(0),
+      deck:[...conf.deck], hand:new Array(HAND_SIZE).fill(null), cycle:[],
       ctrl:conf.ctrl, botCd:0.9, foe:null };
+  }
+  // Ciclo determinístico estilo Clash Royale: embaralha o baralho UMA vez, as 4 primeiras
+  // vão pra mão e o resto vira a fila (cycle). cycle[0] = a carta "próxima" (preview).
+  function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; const t=a[i]; a[i]=a[j]; a[j]=t; } return a; }
+  function dealHand(s){
+    const order = shuffle([...s.deck]);
+    s.hand = []; for (let i=0;i<HAND_SIZE;i++) s.hand.push(order[i] ? { type:order[i] } : null);
+    s.cycle = order.slice(HAND_SIZE);
+  }
+  // ao gastar uma carta, ela (ou, se fundida, suas cartas-base) vai pro fim da fila e o slot
+  // puxa a "próxima" — mantém os 8 do baralho ciclando de forma justa.
+  function cycleCard(s, i, spent){
+    s.hand[i] = s.cycle.length ? { type: s.cycle.shift() } : null;   // a "próxima" entra no slot
+    for (const t of spent) s.cycle.push(t);                          // a(s) carta(s) gasta(s) vão pro fim
   }
 
   function startBattle() {
@@ -606,7 +626,7 @@
     const B = makeSide("B", { hp:800, moveDelay:.16, dmgMult:1.0, regen:.7, drawSpeed:1.0, maxEnergy:10,
       color:"#d2502c", ico:"♟", deck:[...DEFAULT_DECK], ctrl: battleMode==="local2" ? "local2" : "bot" });
     A.foe = B; B.foe = A;
-    for (let i=0;i<HAND_SIZE;i++) { A.hand[i] = { type: rand(A.deck) }; B.hand[i] = { type: rand(B.deck) }; }
+    dealHand(A); dealHand(B);
     S = { A, B, local: A, mode: battleMode, owner: makeOwner(), steals: [],
       effects:[], floaters:[], fx:[], shake:{t:0,dur:1,mag:0}, hitstop:0, over:null, t:0,
       round:1, wins:{A:0,B:0}, rtime:ROUND_TIME, interT:0, lastRoundWinner:null };
@@ -748,7 +768,7 @@
     s.hp=s.maxhp; s.energy=s.maxEnergy; s.energyTick=0; s.energySpent=0; s.fusionPts=0; s._lfp=-1;
     s.col=1; s.row = s.id==="A" ? 4 : 1; s.moveCd=0; s.flash=0; s.guard=0; s.guardReflect=false;
     s.bleed=0; s.bleedBy=null; s.bleedClk=0; s.rooted=0; s.chanMit=0; s.botCd=0.9;
-    for (let i=0;i<HAND_SIZE;i++){ s.hand[i]={type:rand(s.deck)}; s.drawTimers[i]=0; }
+    dealHand(s);
   }
   function resetRound() {                                      // prepara o próximo round
     resetSide(S.A); resetSide(S.B);
@@ -799,7 +819,8 @@
     side.energySpent += def.cost;
     while (side.energySpent >= 10 && side.fusionPts < 3) { side.energySpent -= 10; side.fusionPts++; }
     if (side.fusionPts >= 3) side.energySpent = Math.min(side.energySpent, 10);
-    side.hand[i] = null; side.drawTimers[i] = 0; if (side===S.local) renderHand();
+    cycleCard(side, i, card.parts || [card.type]);   // fundida devolve as bases; normal devolve a si mesma
+    if (side===S.local) renderHand();
   }
   function flashEnergy() { const m=document.getElementById("energy"); m.style.outline="2px solid #e24b4a"; setTimeout(()=>m.style.outline="",160); sfxDeny(); }
   function moveSide(side, dc, dr) { if (side.moveCd>0 || side.rooted>0) return;   // gun del sol prende no lugar
@@ -822,7 +843,11 @@
   /* ---- comandos de input (roteados: guest envia ao host; senão aplica local) ---- */
   function doFuse(side, i, j){ if (!side.hand[i]||!side.hand[j]) return false;
     const res=recipeFor(side.hand[i].type, side.hand[j].type); if (!res || side.fusionPts<1) return false;
-    side.hand[j]={type:res}; side.hand[i]=null; side.drawTimers[i]=0; side.fusionPts--; if (side===S.local) renderHand(); sfxFire(); return true; }
+    const partsI = side.hand[i].parts || [side.hand[i].type];       // acumula as cartas-base (até em triplas)
+    const partsJ = side.hand[j].parts || [side.hand[j].type];
+    side.hand[j] = { type:res, parts: partsI.concat(partsJ) };       // fundida fica na mão, lembrando suas bases
+    side.hand[i] = side.cycle.length ? { type: side.cycle.shift() } : null;   // slot vago puxa a "próxima"
+    side.fusionPts--; if (side===S.local) renderHand(); sfxFire(); return true; }
   const isGuest = () => S && S.net && S.net.role==="guest";
   function cmdMove(dx,dy){ if (isGuest()) netSend({t:"in",k:"move",dx:-dx,dy:-dy}); else moveSide(S.local,dx,dy); }
   function cmdFire(i){ if (isGuest()) netSend({t:"in",k:"fire",i}); else fireCard(S.local,i); }
@@ -875,7 +900,7 @@
   function enterBattle(){ Object.values(screens).forEach(s=>s.classList.remove("on")); screens.battle.classList.add("on"); cur="battle"; }
   function startNetHost(){
     const A=buildSideFromCfg("A", net.cfg, "local"), B=buildSideFromCfg("B", net.guestCfg, "remote"); A.foe=B; B.foe=A;
-    for (let i=0;i<HAND_SIZE;i++){ A.hand[i]={type:rand(A.deck)}; B.hand[i]={type:rand(B.deck)}; }
+    dealHand(A); dealHand(B);
     S={ A,B, local:A, mode:"net", net, owner:makeOwner(), steals:[], effects:[], floaters:[], fx:[], shake:{t:0,dur:1,mag:0}, hitstop:0, over:null, t:0,
       round:1, wins:{A:0,B:0}, rtime:ROUND_TIME, interT:0, lastRoundWinner:null };
     net.sentOver=false; net.inGame=true; netBattleUI("você (anfitrião)"); }
@@ -894,7 +919,8 @@
   function applyRemoteInput(m){ const B=S&&S.B; if(!B||S.over) return;
     if (m.k==="move") moveSide(B, m.dx, m.dy); else if (m.k==="fire") fireCard(B, m.i); else if (m.k==="fuse") doFuse(B, m.i, m.j); }
   function sideSnap(s){ return { col:s.col,row:s.row,hp:s.hp,maxhp:s.maxhp,color:s.color,ico:s.ico,guard:s.guard,guardReflect:s.guardReflect,flash:s.flash,rooted:s.rooted,chanMit:s.chanMit,
-    energy:s.energy,maxEnergy:s.maxEnergy,fusionPts:s.fusionPts,energySpent:s.energySpent, hand:s.hand.map(c=>c?c.type:null) }; }
+    energy:s.energy,maxEnergy:s.maxEnergy,fusionPts:s.fusionPts,energySpent:s.energySpent,
+    hand:s.hand.map(c=>c?c.type:null), next:(s.cycle&&s.cycle.length)?s.cycle[0]:null }; }
   function effSnap(e){ const o={kind:e.kind}; for (const f of ["x","y","col","row","big","fired","windup","t","arm","c","r","i","hit","delay","life","telegraphed","color","dur","finale","vfx","oc","orow","style","tint","dir"]) if (e[f]!==undefined) o[f]=e[f];
     if (e.tiles) o.tiles=e.tiles.map(t=>({c:t.c,r:t.r})); if (e.path) o.path=e.path; if (e.rows) o.rows=e.rows; return o; }
   function makeSnap(){ return { A:sideSnap(S.A), B:sideSnap(S.B), owner:S.owner,
@@ -940,8 +966,6 @@
   function updateSide(s, dt) {
     s.energyTick += dt;
     if (s.energyTick >= s.regen && s.energy < s.maxEnergy) { s.energy++; s.energyTick=0; }
-    for (let i=0;i<HAND_SIZE;i++) if (!s.hand[i]) { s.drawTimers[i]+=dt;
-      if (s.drawTimers[i] >= 0.9*s.drawSpeed) { s.hand[i]={type:rand(s.deck)}; s.drawTimers[i]=0; if (s===S.local) renderHand(); } }
     s.moveCd=Math.max(0,s.moveCd-dt); s.flash=Math.max(0,s.flash-dt); s.guard=Math.max(0,s.guard-dt);
     s.rooted=Math.max(0,s.rooted-dt); s.chanMit=Math.max(0,s.chanMit-dt);
     if (s.bleed > 0) { s.bleedClk += dt;                          // sangramento: dano ao longo do tempo
@@ -1295,18 +1319,26 @@
 
   /* ---- mão (do lado local) ---- */
   const handEl = document.getElementById("hand");
+  const nextEl = document.getElementById("nextCard");
+  function paintCard(el, type, extraClass){
+    if (!type){ el.className = "card empty" + (extraClass?" "+extraClass:""); el.style.borderColor=""; el.innerHTML=""; return; }
+    const def=CHIPS[type], col=chipCol(type);
+    el.className = "card" + (def.fused ? " fused" : "") + (extraClass?" "+extraClass:"");
+    el.style.borderColor = def.fused ? "" : col;
+    el.innerHTML=`<span class="cost">${def.cost}</span><span class="ico" style="color:${col}">${def.ico}</span><span class="nm">${def.nm}</span>`;
+  }
   function renderHand() {
     handEl.innerHTML = "";
     const me = S ? S.local : null;
     for (let i=0;i<HAND_SIZE;i++) {
       const card = me ? me.hand[i] : null;
-      const el = document.createElement("div");
-      el.className = "card" + (card ? (CHIPS[card.type].fused ? " fused" : "") : " empty"); el.dataset.index = i;
-      if (card){ const def=CHIPS[card.type], col=chipCol(card.type);
-        if (!def.fused) el.style.borderColor = col;
-        el.innerHTML=`<span class="cost">${def.cost}</span><span class="ico" style="color:${col}">${def.ico}</span><span class="nm">${def.nm}</span>`; }
+      const el = document.createElement("div"); el.dataset.index = i;
+      paintCard(el, card ? card.type : null);
       handEl.appendChild(el);
     }
+    // "próxima" (preview, não jogável) = topo do ciclo (local) ou next do snapshot (visitante)
+    const nextType = me ? ((me.cycle && me.cycle.length) ? me.cycle[0] : me.next) : null;
+    paintCard(nextEl, nextType || null);
   }
   let drag = null; const ghost = document.getElementById("ghost");
   handEl.addEventListener("pointerdown", e => {
