@@ -43,7 +43,10 @@ def lan_ip() -> str:
 
 
 async def index(request):
-    return web.FileResponse(ROOT / "index.html")
+    # no-cache = o navegador SEMPRE revalida o index.html com o servidor (via ETag/Last-Modified).
+    # Assim cada deploy novo aparece na hora, em vez de servir uma versao velha do cache do navegador.
+    # (Continua eficiente: se nada mudou, o servidor responde 304 e nao reenvia o arquivo.)
+    return web.FileResponse(ROOT / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 async def notify_peers(room, exclude=None):
