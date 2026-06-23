@@ -1,0 +1,10 @@
+# Blueprint do Render — sobe o servidor do Grid Battler (jogo + relay PvP) num passo.
+# No Render: New → Blueprint → conecte este repositório. Ele lê este arquivo e cria tudo.
+services:
+  - type: web
+    name: grid-battler
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python relay.py
+    # O Render injeta a variável PORT automaticamente; o relay.py já a lê.

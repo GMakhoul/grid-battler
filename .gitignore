@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# Editor / ferramentas locais (não precisam ir pro servidor)
+.claude/
+
+# SO
+Thumbs.db
+.DS_Store
