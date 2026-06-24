@@ -20,6 +20,7 @@ Jogar pela INTERNET (com amigos longe) — túnel Cloudflare:
 Requer: aiohttp (já instalado neste ambiente).
 """
 import os
+import time
 import socket
 import pathlib
 from aiohttp import web, WSMsgType
@@ -28,7 +29,7 @@ ROOT = pathlib.Path(__file__).parent
 # Hosts gratuitos (Render, Koyeb, etc.) injetam a porta na variavel de ambiente PORT.
 # Localmente, cai no 8765 de sempre.
 PORT = int(os.environ.get("PORT", 8765))
-rooms = {}  # codigo -> lista de websockets (no maximo 2)
+rooms = {}  # codigo -> {"peers": [ws...], "name": str, "color": str, "ts": float}
 
 
 def lan_ip() -> str:
@@ -49,13 +50,25 @@ async def index(request):
     return web.FileResponse(ROOT / "index.html", headers={"Cache-Control": "no-cache"})
 
 
-async def notify_peers(room, exclude=None):
-    for p in list(room):
+async def notify_peers(peers, exclude=None):
+    for p in list(peers):
         if p is not exclude and not p.closed:
             try:
-                await p.send_json({"t": "peer", "peers": len(room)})
+                await p.send_json({"t": "peer", "peers": len(peers)})
             except Exception:
                 pass
+
+
+async def rooms_list(request):
+    # Salas ABERTAS = com exatamente 1 jogador esperando um oponente.
+    # O cliente faz polling disso pra montar o "navegador de salas" (estilo CS 1.6).
+    now = time.time()
+    open_rooms = [
+        {"code": code, "name": r["name"] or "sala", "color": r["color"], "wait": int(now - r["ts"])}
+        for code, r in rooms.items() if len(r["peers"]) == 1
+    ]
+    open_rooms.sort(key=lambda x: -x["wait"])  # quem espera ha mais tempo aparece primeiro
+    return web.json_response({"rooms": open_rooms}, headers={"Cache-Control": "no-cache"})
 
 
 async def ws_handler(request):
@@ -63,40 +76,47 @@ async def ws_handler(request):
     await ws.prepare(request)
 
     code = (request.query.get("room") or "default").upper()[:8]
-    room = rooms.setdefault(code, [])
+    name = (request.query.get("name") or "").strip()[:16]
+    color = (request.query.get("color") or "").strip()[:9]
+    room = rooms.setdefault(code, {"peers": [], "name": "", "color": "", "ts": time.time()})
+    peers = room["peers"]
 
-    if len(room) >= 2:                       # sala cheia
+    if len(peers) >= 2:                       # sala cheia
         await ws.send_json({"t": "full"})
         await ws.close()
         return ws
 
-    role = "host" if len(room) == 0 else "guest"
-    room.append(ws)
-    await ws.send_json({"t": "role", "role": role, "room": code, "peers": len(room)})
-    await notify_peers(room, exclude=ws)
-    print(f"[relay] sala {code}: {role} entrou ({len(room)}/2)")
+    role = "host" if len(peers) == 0 else "guest"
+    peers.append(ws)
+    if role == "host":                        # quem cria a sala define o rotulo que aparece na lista
+        room["name"] = name or "sala"
+        room["color"] = color
+        room["ts"] = time.time()
+    await ws.send_json({"t": "role", "role": role, "room": code, "peers": len(peers)})
+    await notify_peers(peers, exclude=ws)
+    print(f"[relay] sala {code}: {role} entrou ({len(peers)}/2)")
 
     try:
         async for msg in ws:
             if msg.type == WSMsgType.TEXT:
-                for p in room:                # encaminha pro outro da mesma sala
+                for p in peers:               # encaminha pro outro da mesma sala
                     if p is not ws and not p.closed:
                         await p.send_str(msg.data)
             elif msg.type == WSMsgType.ERROR:
                 break
     finally:
-        if ws in room:
-            room.remove(ws)
-        if not room:
+        if ws in peers:
+            peers.remove(ws)
+        if not peers:
             rooms.pop(code, None)
-        await notify_peers(room)
-        print(f"[relay] sala {code}: alguem saiu ({len(room)}/2)")
+        await notify_peers(peers)
+        print(f"[relay] sala {code}: alguem saiu ({len(peers)}/2)")
     return ws
 
 
 def main():
     app = web.Application()
-    app.add_routes([web.get("/", index), web.get("/ws", ws_handler)])
+    app.add_routes([web.get("/", index), web.get("/rooms", rooms_list), web.get("/ws", ws_handler)])
     ip = lan_ip()
     print("=" * 56)
     print("  Grid Battler — servidor PvP")

@@ -182,6 +182,14 @@
   #ghost { position: fixed; pointer-events: none; z-index: 50; width: 54px; height: 62px; border-radius: 11px;
     background: #221d12; border: 1.5px solid var(--gold); display: none; align-items: center; justify-content: center;
     font-size: 23px; transform: translate(-50%,-50%); }
+  #roomList { display: flex; flex-direction: column; gap: 6px; max-height: 38vh; overflow: auto; }
+  .roomrow { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 10px;
+    background: #11141a; border: 1px solid #232a36; }
+  .roomrow .rdot { width: 13px; height: 13px; border-radius: 50%; flex: 0 0 auto; border: 1px solid rgba(255,255,255,.25); }
+  .roomrow .rname { flex: 1 1 auto; text-align: left; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .roomrow .rwait { opacity: .4; font-size: 11px; flex: 0 0 auto; }
+  .roomrow .btn { padding: 6px 16px; font-size: 13px; flex: 0 0 auto; }
+  .roomempty { opacity: .45; font-size: 13px; padding: 14px 0; }
   #fuseHint { text-align: center; font-size: 11px; opacity: .5; padding-bottom: 3px; }
 
   /* ---- RESULT ---- */
@@ -269,18 +277,27 @@
     </div>
   </div>
 
-  <!-- NET LOBBY -->
-  <div class="screen" id="screen-net" style="align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center">
-    <h2>jogar com amigo</h2>
-    <button class="btn primary" id="netCreate" style="width:240px">criar sala</button>
-    <div style="opacity:.5;font-size:13px">— ou entre com um código —</div>
-    <div style="display:flex;gap:8px">
-      <input id="netCode" maxlength="8" placeholder="código" autocomplete="off" autocapitalize="characters"
-        style="text-transform:uppercase;width:130px;text-align:center;font-size:18px;letter-spacing:3px;padding:10px;border-radius:10px;border:1px solid #2e3647;background:#11141a;color:#e8edf2;touch-action:auto;-webkit-user-select:text;user-select:text" />
-      <button class="btn" id="netJoin">entrar</button>
+  <!-- NET LOBBY (navegador de salas, estilo CS 1.6) -->
+  <div class="screen" id="screen-net" style="align-items:center;justify-content:flex-start;gap:12px;padding:24px 18px;text-align:center;overflow:auto">
+    <h2 style="margin-top:8px">jogar com amigo</h2>
+    <button class="btn primary" id="netCreate" style="width:260px">criar sala</button>
+    <div id="roomBrowser" style="width:300px;max-width:92vw">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="opacity:.6;font-size:13px">salas abertas</span>
+        <span id="roomRefresh" style="opacity:.4;font-size:11px"></span>
+      </div>
+      <div id="roomList"><div class="roomempty">procurando salas…</div></div>
     </div>
-    <div class="sub" id="netStatus" style="opacity:.85;font-size:14px;max-width:320px;line-height:1.5;min-height:42px"></div>
-    <button class="btn ghost" id="netCancel">cancelar</button>
+    <details style="width:300px;max-width:92vw">
+      <summary style="opacity:.5;font-size:13px;cursor:pointer;list-style:none">entrar por código (sala privada)</summary>
+      <div style="display:flex;gap:8px;margin-top:8px;justify-content:center">
+        <input id="netCode" maxlength="8" placeholder="código" autocomplete="off" autocapitalize="characters"
+          style="text-transform:uppercase;width:130px;text-align:center;font-size:18px;letter-spacing:3px;padding:10px;border-radius:10px;border:1px solid #2e3647;background:#11141a;color:#e8edf2;touch-action:auto;-webkit-user-select:text;user-select:text" />
+        <button class="btn" id="netJoin">entrar</button>
+      </div>
+    </details>
+    <div class="sub" id="netStatus" style="opacity:.85;font-size:14px;max-width:320px;line-height:1.5;min-height:38px"></div>
+    <button class="btn ghost" id="netCancel">voltar</button>
   </div>
 
   <!-- RESULT -->
@@ -443,6 +460,7 @@
     if (name === "char") buildCharScreen();
     if (name === "deck") buildDeckScreen();
     if (name === "battle") startBattle(); else stopBattle();
+    if (name === "net") startRoomPolling(); else stopRoomPolling();   // lista de salas só atualiza no lobby
   }
   document.querySelectorAll("[data-go]").forEach(b => b.addEventListener("click", () => show(b.dataset.go)));
   const deckReady = () => SAVE.data.deck.length === 8;   // os 8 slots precisam estar cheios p/ jogar
@@ -856,27 +874,63 @@
     doFuse(S.local,i,j); }
 
   /* ============================ REDE (PvP Wi-Fi) ============================ */
-  let net = null;
+  let net = null, roomPoll = null;
   function netSend(o){ if (net && net.ws && net.ws.readyState===1) net.ws.send(JSON.stringify(o)); }
   function netStatus(t){ document.getElementById("netStatus").textContent = t; }
   function myCfg(){ const b=charBuild(); return { color:SAVE.data.color, ico:b.ico, deck: SAVE.data.deck.length>=4?[...SAVE.data.deck]:[...DEFAULT_DECK],
     hp:b.hp, moveDelay:b.moveDelay, dmgMult:b.dmgMult, regen:b.regen, drawSpeed:b.drawSpeed, maxEnergy:b.maxEnergy }; }
   function newRoomCode(){ const a="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s=""; for(let i=0;i<4;i++) s+=a[(Math.random()*a.length)|0]; return s; }
-  function connectNet(code){
+  function myDisplayName(){ const c=CHARACTERS.find(c=>c.id===SAVE.data.char)||CHARACTERS[0]; return c.nm; }
+  // create: passe {name,color} p/ a sala aparecer rotulada na lista. join: só o código.
+  function connectNet(code, opts){
     if (net && net.ws) { try{ net.ws.close(); }catch(e){} }
     netStatus("conectando…");
     const base = window.__WS || ((location.protocol==="https:"?"wss":"ws")+"://"+location.host+"/ws");
-    let ws; try { ws = new WebSocket(base + "?room=" + encodeURIComponent(code)); } catch(e){ netStatus("falha ao conectar: "+e.message); return; }
+    let url = base + "?room=" + encodeURIComponent(code);
+    if (opts && opts.name)  url += "&name="  + encodeURIComponent(opts.name);
+    if (opts && opts.color) url += "&color=" + encodeURIComponent(opts.color);
+    let ws; try { ws = new WebSocket(url); } catch(e){ netStatus("falha ao conectar: "+e.message); return; }
     net = { ws, role:null, room:code, started:false, guestCfg:null, hostCfg:null, cfg:myCfg(), snapAcc:0, sentOver:false };
     ws.onopen = () => netStatus("conectado. entrando na sala…");
     ws.onerror = () => netStatus("erro de conexão. confira a URL do servidor (relay.py / túnel).");
     ws.onclose = () => { if (cur==="net") netStatus("conexão encerrada."); };
     ws.onmessage = ev => { let m; try{ m=JSON.parse(ev.data); }catch(e){ return; } onNetMsg(m); };
   }
+  /* ---- navegador de salas (lista aberta + polling, estilo CS 1.6) ---- */
+  function roomsUrl(){ return window.__ROOMS || (location.origin + "/rooms"); }
+  const safeColor = c => (typeof c==="string" && /^#[0-9a-f]{3,8}$/i.test(c)) ? c : "#6b7686";   // cor vem de outro jogador: valida
+  function renderRoomList(list){
+    const el = document.getElementById("roomList"); if (!el) return;
+    const mine = net && net.room;
+    const others = (list||[]).filter(r => r.code !== mine);
+    el.innerHTML = "";
+    if (!others.length){ el.innerHTML = '<div class="roomempty">nenhuma sala aberta — crie uma!</div>'; return; }
+    for (const r of others){
+      const row = document.createElement("div"); row.className = "roomrow";
+      const dot = document.createElement("span"); dot.className = "rdot"; dot.style.background = safeColor(r.color);
+      const nm  = document.createElement("span"); nm.className = "rname"; nm.textContent = r.name || "sala";   // textContent = sem XSS
+      const wt  = document.createElement("span"); wt.className = "rwait"; wt.textContent = (r.wait||0) + "s";
+      const b   = document.createElement("button"); b.className = "btn primary"; b.textContent = "entrar";
+      b.addEventListener("click", () => connectNet(r.code));
+      row.append(dot, nm, wt, b); el.appendChild(row);
+    }
+  }
+  function fetchRooms(){
+    const rr = document.getElementById("roomRefresh");
+    fetch(roomsUrl(), {cache:"no-store"}).then(r=>r.json()).then(d=>{
+      if (cur!=="net") return; renderRoomList(d.rooms); if (rr) rr.textContent = "● ao vivo";
+    }).catch(()=>{
+      if (cur!=="net") return; if (rr) rr.textContent = "sem conexão";
+      const el=document.getElementById("roomList");
+      if (el && !el.querySelector(".roomrow")) el.innerHTML = '<div class="roomempty">não deu pra listar salas (servidor offline?)</div>';
+    });
+  }
+  function startRoomPolling(){ stopRoomPolling(); fetchRooms(); roomPoll = setInterval(fetchRooms, 2500); }
+  function stopRoomPolling(){ if (roomPoll){ clearInterval(roomPoll); roomPoll=null; } }
   function onNetMsg(m){
     if (!net) return;
     if (m.t==="role"){ net.role=m.role; net.room=m.room||net.room; netSend({t:"cfg", cfg:net.cfg});
-      netStatus(m.role==="host" ? ("sala "+net.room+" — mande esse código pro amigo e aguarde ele entrar…") : ("entrou na sala "+net.room+". aguardando o anfitrião começar…")); }
+      netStatus(m.role==="host" ? ("sala criada! aguardando um oponente entrar pela lista…  (código privado: "+net.room+")") : ("entrou na sala. aguardando o anfitrião começar…")); }
     else if (m.t==="full"){ netStatus("sala cheia: já há 2 jogadores. feche uma aba e tente de novo."); }
     else if (m.t==="cfg"){ if (net.role==="host"){ net.guestCfg=m.cfg; maybeStartHost(); } else net.hostCfg=m.cfg; }
     else if (m.t==="start"){ if (net.role==="guest"){ net.hostCfg=m.cfg||net.hostCfg; startNetGuest(); } }
@@ -911,6 +965,7 @@
       round:1, wins:{A:0,B:0}, rtime:ROUND_TIME, interT:0, lastRoundWinner:null };
     net.inGame=true; netBattleUI("você (visitante)"); }
   function netBattleUI(botLabel){
+    stopRoomPolling();                        // a partida usa enterBattle() (não show), então paramos a lista aqui
     enterBattle();
     document.getElementById("topName").textContent="oponente"; document.getElementById("botName").textContent=botLabel;
     document.getElementById("dummyToggle").style.display="none";
@@ -940,7 +995,7 @@
     document.getElementById("againBtn").textContent = "revanche";
     setTimeout(()=>{ if (cur==="battle") show("result"); }, 700); }
   document.getElementById("netBtn").addEventListener("click", gate(() => { show("net"); netStatus(""); }, "title"));
-  document.getElementById("netCreate").addEventListener("click", () => connectNet(newRoomCode()));
+  document.getElementById("netCreate").addEventListener("click", () => connectNet(newRoomCode(), {name: myDisplayName(), color: SAVE.data.color}));
   document.getElementById("netJoin").addEventListener("click", () => { const v=document.getElementById("netCode").value.trim().toUpperCase().slice(0,8); if (v.length>=3) connectNet(v); else netStatus("digite o código que seu amigo criou."); });
   document.getElementById("netCancel").addEventListener("click", () => { if (net&&net.ws) try{net.ws.close();}catch(e){} net=null; show("title"); });
 
