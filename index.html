@@ -3,10 +3,17 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="theme-color" content="#07080b" />
+<!-- modo "app" (tela de inicio): no iOS roda em standalone, SEM os gestos de zoom do Safari -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Grid Battler" />
 <title>Grid Battler</title>
 <style>
   :root { --gold:#efb227; --teal:#1d9e75; --blue:#378add; --coral:#d85a30; --purple:#7f77dd; }
-  * { box-sizing: border-box; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  * { box-sizing: border-box; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation; }   /* mata o double-tap-to-zoom em tudo (arena/scroll/input mantêm o seu próprio) */
   html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
     background: #07080b; color: #e8edf2; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; touch-action: none; }
   #app { position: relative; height: 100%; max-width: 520px; margin: 0 auto; }
@@ -257,7 +264,7 @@
     <div id="roundHud"><span id="roundLbl">R1</span><span id="roundTimer">1:30</span><span id="roundScore">0 × 0</span></div>
     <div id="roundBanner"></div>
     <div class="bar-wrap">
-      <div class="label"><span><span class="mini" id="quitBtn">‹ sair</span> &nbsp; <span id="topName">oponente</span></span><span id="ehpTxt">700</span></div>
+      <div class="label"><span><span class="mini" id="quitBtn">‹ sair</span> &nbsp; <span id="topName">oponente</span> <span class="mini" id="pingTag" style="display:none"></span></span><span id="ehpTxt">700</span></div>
       <div class="meter" id="enemyHp"><div></div></div>
     </div>
     <div id="arenaWrap"><canvas id="cv"></canvas></div>
@@ -453,6 +460,7 @@
   document.querySelectorAll(".screen").forEach(s => screens[s.id.replace("screen-","")] = s);
   let cur = "title", battleMode = "single", loadoutReturn = "title";   // de onde o editor de loadout foi aberto (volta pra lá)
   function show(name) {
+    stopPing();                                                                  // sair de qualquer tela encerra o medidor (a partida reinicia via netBattleUI)
     if (net && name==="title"){ try{ net.ws.close(); }catch(e){} net=null; }   // só desconecta ao voltar pro menu (revanche mantém a conexão)
     Object.values(screens).forEach(s => s.classList.remove("on"));
     screens[name].classList.add("on"); cur = name;
@@ -874,7 +882,7 @@
     doFuse(S.local,i,j); }
 
   /* ============================ REDE (PvP Wi-Fi) ============================ */
-  let net = null, roomPoll = null;
+  let net = null, roomPoll = null, pingTimer = null;
   function netSend(o){ if (net && net.ws && net.ws.readyState===1) net.ws.send(JSON.stringify(o)); }
   function netStatus(t){ document.getElementById("netStatus").textContent = t; }
   function myCfg(){ const b=charBuild(); return { color:SAVE.data.color, ico:b.ico, deck: SAVE.data.deck.length>=4?[...SAVE.data.deck]:[...DEFAULT_DECK],
@@ -927,6 +935,18 @@
   }
   function startRoomPolling(){ stopRoomPolling(); fetchRooms(); roomPoll = setInterval(fetchRooms, 2500); }
   function stopRoomPolling(){ if (roomPoll){ clearInterval(roomPoll); roomPoll=null; } }
+  /* ---- medidor de ping (RTT real entre os 2 jogadores, passando pelo relay) ---- */
+  function updatePingTag(){
+    const el = document.getElementById("pingTag"); if (!el) return;
+    if (net && net.ping!=null && net.inGame){
+      const p = net.ping; el.style.display="";
+      el.textContent = "📶 " + p + "ms";
+      el.style.color = p<80 ? "#5fd38a" : p<160 ? "#e8c24a" : "#e8705f";   // verde / amarelo / vermelho
+    } else { el.style.display="none"; el.textContent=""; }
+  }
+  function startPing(){ stopPing(); if (net) netSend({t:"ping", ts:performance.now()});
+    pingTimer = setInterval(() => { if (net && net.inGame) netSend({t:"ping", ts:performance.now()}); else stopPing(); }, 1000); }
+  function stopPing(){ if (pingTimer){ clearInterval(pingTimer); pingTimer=null; } if (net) net.ping=null; updatePingTag(); }
   function onNetMsg(m){
     if (!net) return;
     if (m.t==="role"){ net.role=m.role; net.room=m.room||net.room; netSend({t:"cfg", cfg:net.cfg});
@@ -935,6 +955,8 @@
     else if (m.t==="cfg"){ if (net.role==="host"){ net.guestCfg=m.cfg; maybeStartHost(); } else net.hostCfg=m.cfg; }
     else if (m.t==="start"){ if (net.role==="guest"){ net.hostCfg=m.cfg||net.hostCfg; startNetGuest(); } }
     else if (m.t==="in"){ if (net.role==="host") applyRemoteInput(m); }
+    else if (m.t==="ping"){ netSend({t:"pong", ts:m.ts}); }                       // devolve o carimbo de tempo
+    else if (m.t==="pong"){ net.ping=Math.round(performance.now()-m.ts); updatePingTag(); }   // RTT real (ida+volta pelo relay)
     else if (m.t==="snap"){ if (net.role==="guest") applySnap(m.s); }
     else if (m.t==="over"){ if (net.role==="guest") guestOver(m.winner); }
     else if (m.t==="ready"){ if (net.role==="host"){ net.guestCfg=m.cfg; net.guestReady=true; }
@@ -966,6 +988,7 @@
     net.inGame=true; netBattleUI("você (visitante)"); }
   function netBattleUI(botLabel){
     stopRoomPolling();                        // a partida usa enterBattle() (não show), então paramos a lista aqui
+    startPing();                              // começa a medir o ping com o oponente
     enterBattle();
     document.getElementById("topName").textContent="oponente"; document.getElementById("botName").textContent=botLabel;
     document.getElementById("dummyToggle").style.display="none";
