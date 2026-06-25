@@ -1001,14 +1001,21 @@
     hand:s.hand.map(c=>c?c.type:null), next:(s.cycle&&s.cycle.length)?s.cycle[0]:null }; }
   function effSnap(e){ const o={kind:e.kind}; for (const f of ["x","y","col","row","big","fired","windup","t","arm","c","r","i","hit","delay","life","telegraphed","color","dur","finale","vfx","oc","orow","style","tint","dir"]) if (e[f]!==undefined) o[f]=e[f];
     if (e.tiles) o.tiles=e.tiles.map(t=>({c:t.c,r:t.r})); if (e.path) o.path=e.path; if (e.rows) o.rows=e.rows; return o; }
-  function makeSnap(){ return { A:sideSnap(S.A), B:sideSnap(S.B), owner:S.owner,
+  function makeSnap(){ return { A:sideSnap(S.A), B:sideSnap(S.B), owner:S.owner, cell:cell,   // cell do host p/ o guest reescalar pixels
     steals:S.steals.map(x=>({c:x.c,r:x.r,t:x.t,grab:x.grab,orig:x.orig})), effects:S.effects.map(effSnap),
     floaters:S.floaters, fx:S.fx, shake:S.shake, t:S.t, over:S.over,
     round:S.round, wins:S.wins, rtime:S.rtime, interT:S.interT, lastRoundWinner:S.lastRoundWinner }; }
   function applySnap(s){ if (!S) return;
+    // telas diferentes => cell diferente. Coords em PIXEL (projétil x/y, floaters, anéis) vêm em px do host;
+    // reescala p/ o px deste aparelho. Efeitos por tile (col/row) já recalculam sozinhos.
+    const scl = (s.cell && s.cell>0) ? cell / s.cell : 1;
     Object.assign(S.A, s.A); Object.assign(S.B, s.B);
     S.A.hand=s.A.hand.map(t=>t?{type:t}:null); S.B.hand=s.B.hand.map(t=>t?{type:t}:null);
-    S.owner=s.owner; S.steals=s.steals; S.effects=s.effects; S.floaters=s.floaters; S.fx=s.fx; S.shake=s.shake; S.t=s.t;
+    S.owner=s.owner; S.steals=s.steals; S.t=s.t;
+    S.effects = s.effects.map(e => { if (e.x!==undefined) e.x*=scl; if (e.y!==undefined) e.y*=scl; return e; });   // só o projétil tem x/y
+    S.floaters = s.floaters.map(f => { f.x*=scl; f.y*=scl; if (f.dx) f.dx*=scl; if (f.dy) f.dy*=scl; return f; });
+    S.fx = s.fx.map(r => { r.x*=scl; r.y*=scl; r.r0*=scl; r.r1*=scl; return r; });
+    S.shake = s.shake; if (S.shake && S.shake.mag) S.shake.mag*=scl;
     if (s.round!==undefined){ S.round=s.round; S.wins=s.wins; S.rtime=s.rtime; S.interT=s.interT; S.lastRoundWinner=s.lastRoundWinner; }
     renderHand(); if (s.over && !S._shownOver){ S._shownOver=true; guestOver(s.over); } }
   function guestOver(winner){ if (!S) return; S.over=winner; const won = winner===S.local.id;
