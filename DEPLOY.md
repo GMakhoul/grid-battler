@@ -94,6 +94,19 @@ Passos:
 > O jogo é o mesmo arquivo; o cliente monta `wss://<host>/ws` sozinho, então tudo (jogo + salas + relay) roda na URL do Fly.
 > Dá pra manter o Render também (cada plataforma lê seu próprio config); ou desligar o serviço do Render se migrar de vez.
 
+### ⚠️ IMPORTANTE: o relay precisa de UMA máquina só (estado em memória)
+
+O `relay.py` guarda as salas e a partida **na memória**. Se o Fly rodar **2+ máquinas**, os jogadores
+podem cair em máquinas diferentes → a sala existe numa, o amigo entra na outra (vazia) → **a partida não
+começa**; e se uma máquina dormir, o **visitante congela** no meio (o host continua jogando local). Por isso o
+`fly.toml` usa `auto_stop_machines = "off"` + `min_machines_running = 1`, MAS você também precisa garantir **1 máquina**:
+
+- **Pelo terminal (flyctl):** `fly scale count 1 -a grid-battler`
+- **Pelo painel:** menu **Machines** → se houver 2, **apague uma** (deixe a que está em `gru`/São Paulo, estado *started*).
+
+Depois confirme em **Machines**: deve haver **1 máquina**, região **São Paulo (gru)**, *started*. Isso resolve tanto o
+pareamento intermitente quanto o loop de rodadas do visitante.
+
 ---
 
 ## Alternativa: jogo instantâneo, sem PvP online (host estático)
