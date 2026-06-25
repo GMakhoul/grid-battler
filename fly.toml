@@ -1,0 +1,20 @@
+# Fly.io — servidor do Grid Battler em SAO PAULO (gru) p/ baixa latencia no Brasil.
+# (No Render o ping ficava ~440ms; aqui deve cair p/ ~80-160ms.)
+app = "grid-battler"
+primary_region = "gru"
+
+[build]
+
+[env]
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  size = "shared-cpu-1x"

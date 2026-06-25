@@ -75,6 +75,27 @@ git push -u origin main
 
 ---
 
+## Fly.io — servidor em São Paulo (MELHOR ping no Brasil)
+
+O Render não tem datacenter na América do Sul, então o ping fica ruim no Brasil (~440ms). O **Fly.io tem a região
+`gru` (São Paulo)** — hospedar o relay lá derruba o ping pra ~80-160ms. O repo já vem pronto:
+
+- `Dockerfile` — build determinístico (Python + aiohttp + `python relay.py`).
+- `fly.toml` — `app = "grid-battler"`, `primary_region = "gru"`, porta interna 8080 (o `relay.py` lê `PORT`).
+- `.dockerignore` — deixa a imagem enxuta.
+
+Passos:
+1. Conta no https://fly.io (pede cartão mesmo no nível grátis; uma máquina `shared-cpu-1x` que dorme é centavos).
+2. Conecte o repositório `GMakhoul/grid-battler` (você já fez). A cada `git push`, o Fly re-deploya.
+3. Se um deploy falhar no **"Build image"** (ex.: `unauthorized` / "Dockerfile failed to build"), normalmente era a
+   falta do `Dockerfile` — agora que ele existe, é só **re-rodar o deploy** (Deploy → Retry, ou um novo `git push`).
+4. URL final: `https://grid-battler.fly.dev` — compartilhe essa (em vez da do Render) para o ping de São Paulo.
+
+> O jogo é o mesmo arquivo; o cliente monta `wss://<host>/ws` sozinho, então tudo (jogo + salas + relay) roda na URL do Fly.
+> Dá pra manter o Render também (cada plataforma lê seu próprio config); ou desligar o serviço do Render se migrar de vez.
+
+---
+
 ## Alternativa: jogo instantâneo, sem PvP online (host estático)
 
 Se um dia você quiser que a **página carregue instantânea** (sem o "acordar" do servidor) e abrir mão do

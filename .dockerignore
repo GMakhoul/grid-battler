@@ -1,0 +1,11 @@
+# tira do contexto do build o que o servidor nao precisa (imagem menor)
+.git
+.gitignore
+.claude
+__pycache__
+*.pyc
+fly.toml
+render.yaml
+handoff.md
+DEPLOY.md
+permitir-firewall.bat
