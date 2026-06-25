@@ -1017,7 +1017,9 @@
     S.fx = s.fx.map(r => { r.x*=scl; r.y*=scl; r.r0*=scl; r.r1*=scl; return r; });
     S.shake = s.shake; if (S.shake && S.shake.mag) S.shake.mag*=scl;
     if (s.round!==undefined){ S.round=s.round; S.wins=s.wins; S.rtime=s.rtime; S.interT=s.interT; S.lastRoundWinner=s.lastRoundWinner; }
-    renderHand(); if (s.over && !S._shownOver){ S._shownOver=true; guestOver(s.over); } }
+    const handSig = S.local.hand.map(c=>c?c.type:"_").join(",")+"|"+(S.local.next||"");   // só redesenha a mão quando muda (evita 60 rebuilds/s)
+    if (handSig !== S._handSig){ S._handSig = handSig; renderHand(); }
+    if (s.over && !S._shownOver){ S._shownOver=true; guestOver(s.over); } }
   function guestOver(winner){ if (!S) return; S.over=winner; const won = winner===S.local.id;
     const sc = `${(S.wins&&S.wins[S.local.id])||0} × ${(S.wins&&S.wins[S.local.foe.id])||0}`;
     document.getElementById("resTitle").textContent = won ? "você venceu a partida!" : "você perdeu a partida";
@@ -1038,9 +1040,9 @@
       else {
         if (!S.over) { if (S.hitstop>0) S.hitstop=Math.max(0,S.hitstop-dt); else update(dt); }
         draw();
-        if (S.net && S.net.role==="host") {                                    // anfitrião: envia snapshots ~30Hz
+        if (S.net && S.net.role==="host") {                                    // anfitrião: envia snapshots ~60Hz (casa com o redesenho do guest)
           S.net.snapAcc=(S.net.snapAcc||0)+dt;
-          if (S.net.snapAcc>=0.033){ S.net.snapAcc=0; netSend({t:"snap", s:makeSnap()}); }
+          if (S.net.snapAcc>=0.016){ S.net.snapAcc=0; netSend({t:"snap", s:makeSnap()}); }
           if (S.over && !S.net.sentOver){ S.net.sentOver=true; netSend({t:"over", winner:S.over}); }
         }
       }
